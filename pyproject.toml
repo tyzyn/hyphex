@@ -1,0 +1,76 @@
+[project]
+name = "hyphex"
+version = "0.1.0"
+description = "Agent-authored, citation-grounded knowledge bases from unstructured documents."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+
+authors = [
+    { name = "Chris Tyson", email = "chris-tyson@outlook.com" },
+]
+
+keywords = [
+    "knowledge-graph",
+    "rag",
+    "agents",
+    "wiki",
+    "markdown",
+    "citation",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Markup",
+]
+
+dependencies = [
+    "jinja2>=3.1.6",
+    "lark>=1.3.1",
+    "pydantic>=2.12.5",
+    "pyyaml>=6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.151.9",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/tyzyn/hyphex"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
