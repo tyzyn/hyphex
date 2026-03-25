@@ -1,0 +1,19 @@
+## Available Entity Types
+{% for name, nt in node_types.items() %}
+{%- set req = nt.fields | dictsort | selectattr("1.required") | map(attribute="0") | list %}
+- {{ name }}: {{ nt.description }}{% if req %} (requires: {{ req | join(", ") }}){% endif %}
+{%- endfor %}
+
+## Available Relationships
+
+Use [[Target>relationship]] for outgoing edges, [[Target<relationship]] for incoming.
+Choose the most specific type:
+{% for name, rt in relationship_types.items() %}
+{%- set from_str = rt.from_types | join("/") if rt.from_types else "any" %}
+{%- set to_str = rt.to_types | join("/") if rt.to_types else "any" %}
+- {{ name }}: {{ rt.description }} ({{ from_str }} → {{ to_str }})
+{%- endfor %}
+
+Note: In frontmatter, the field name determines the relationship automatically.
+In body content, [[Target]] without >relationship uses the configured default
+(currently: {{ default_relationship }}). Always prefer explicit relationships in prose.

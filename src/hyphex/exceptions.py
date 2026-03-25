@@ -38,3 +38,14 @@ class StoreError(HyphexError):
     Example:
         >>> raise StoreError("Page 'Unknown Topic' does not exist")
     """
+
+
+class SchemaLoadError(HyphexError):
+    """Raised when a schema file cannot be loaded or saved.
+
+    Args:
+        message: Human-readable description of the schema I/O failure.
+
+    Example:
+        >>> raise SchemaLoadError("Failed to load schema from ./hyphex.schema.yml")
+    """

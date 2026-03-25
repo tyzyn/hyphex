@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from hyphex.exceptions import FrontmatterError, HyphexError, ParseError, StoreError
+from hyphex.exceptions import (
+    FrontmatterError,
+    HyphexError,
+    ParseError,
+    SchemaLoadError,
+    StoreError,
+)
 from hyphex.models import Citation, Direction, EntityLink, Page, Source
 from hyphex.parser import Parser
+from hyphex.schema import Schema, SchemaBuilder, SchemaError
 from hyphex.store import WikiStore, slugify
 from hyphex.version import __version__
 
@@ -17,6 +24,10 @@ __all__ = [
     "Page",
     "ParseError",
     "Parser",
+    "Schema",
+    "SchemaBuilder",
+    "SchemaError",
+    "SchemaLoadError",
     "Source",
     "StoreError",
     "WikiStore",
