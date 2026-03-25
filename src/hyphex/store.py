@@ -17,7 +17,10 @@ from hyphex._frontmatter import (
     split_frontmatter,
 )
 from hyphex.exceptions import FrontmatterError, StoreError
+from hyphex.hooks import HookRegistry, SourceDocument, WriteContext
 from hyphex.models import Page
+from hyphex.parser import Parser
+from hyphex.schema import Schema
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +63,18 @@ class WikiStore:
     Does **not** parse Hyphex inline syntax (entity links, citations) —
     that is the ``Parser``'s responsibility.
 
+    Optionally accepts a ``HookRegistry`` to run pre/post-write hooks
+    automatically. When hooks are configured, ``write()`` returns a
+    ``WriteContext`` with warnings and agent context.
+
     Not thread-safe. Suitable for single-agent or sequential-agent usage.
 
     Args:
         root: Path to the wiki directory. Created if it does not exist.
         created_by: Identifier for the auto-populated ``created_by`` field.
+        hooks: Optional hook registry for lifecycle callbacks.
+        parser: Optional Parser instance (passed to hooks via WriteContext).
+        schema: Optional Schema instance (passed to hooks via WriteContext).
 
     Example:
         >>> store = WikiStore(Path("/tmp/wiki"))
@@ -74,9 +84,20 @@ class WikiStore:
         'organisation'
     """
 
-    def __init__(self, root: Path, created_by: str = "unknown") -> None:
+    def __init__(
+        self,
+        root: Path,
+        created_by: str = "unknown",
+        *,
+        hooks: HookRegistry | None = None,
+        parser: Parser | None = None,
+        schema: Schema | None = None,
+    ) -> None:
         self._root = root
         self._created_by = created_by
+        self._hooks = hooks
+        self._parser = parser
+        self._schema = schema
         self._root.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, title: str) -> Path:
@@ -149,17 +170,34 @@ class WikiStore:
         sources = parse_sources(frontmatter)
         return Page(frontmatter=frontmatter, body=body, sources=sources)
 
-    def write(self, title: str, page: Page, *, overwrite: bool = True) -> None:
-        """Write a page to disk.
+    def write(
+        self,
+        title: str,
+        page: Page,
+        *,
+        overwrite: bool = True,
+        source_document: SourceDocument | None = None,
+    ) -> WriteContext | None:
+        """Write a page to disk, running hooks if configured.
 
         Auto-populates ``title``, ``modified``, and (on first write)
         ``created`` and ``created_by`` in the frontmatter.
+
+        When a ``HookRegistry`` is configured, pre-write hooks run before
+        the disk write and post-write hooks run after. If post-write hooks
+        modify the page, the file is re-written automatically.
 
         Args:
             title: Human-readable page title.
             page: The page to write.
             overwrite: If ``False``, raise ``StoreError`` when the file
                 already exists.
+            source_document: Optional source document metadata passed to
+                hooks via ``WriteContext``.
+
+        Returns:
+            A ``WriteContext`` when hooks are configured (contains warnings,
+            agent context, and the final page), or ``None`` otherwise.
 
         Raises:
             StoreError: If ``overwrite`` is ``False`` and the page exists,
@@ -169,6 +207,40 @@ class WikiStore:
             >>> store = WikiStore(Path("/tmp/wiki"))
             >>> store.write("ML", Page(frontmatter={"type": "capability"}, body="Content."))
         """
+        if self._hooks is None:
+            self._write_to_disk(title, page, overwrite=overwrite)
+            return None
+
+        ctx = WriteContext(
+            title=title,
+            page=page,
+            source_document=source_document,
+            store=self,
+            parser=self._parser,
+            schema=self._schema,
+        )
+        ctx = self._hooks.run("pre_write", ctx)
+        pre_page = ctx.page
+        self._write_to_disk(title, pre_page, overwrite=overwrite)
+        ctx = self._hooks.run("post_write", ctx)
+
+        # Re-write if post-write hooks modified the page.
+        if ctx.page is not pre_page:
+            self._write_to_disk(title, ctx.page, overwrite=True)
+
+        return ctx
+
+    def _write_to_disk(self, title: str, page: Page, *, overwrite: bool = True) -> None:
+        """Write a page to disk with frontmatter auto-population.
+
+        Args:
+            title: Human-readable page title.
+            page: The page to write.
+            overwrite: If ``False``, raise on existing file.
+
+        Raises:
+            StoreError: On write failure or overwrite conflict.
+        """
         path = self.path_for(title)
 
         fm = dict(page.frontmatter)
@@ -176,7 +248,6 @@ class WikiStore:
         now = datetime.now(timezone.utc).isoformat()
         fm["modified"] = now
 
-        # Preserve created/created_by from existing file or set on first write.
         existing_fm: dict[str, Any] | None = None
         if path.is_file():
             if not overwrite:
@@ -194,7 +265,6 @@ class WikiStore:
             fm.setdefault("created", now)
             fm.setdefault("created_by", self._created_by)
 
-        # Ensure sources from the Page model are in frontmatter for roundtrip.
         if page.sources and "sources" not in fm:
             fm["sources"] = [s.model_dump(exclude_none=True) for s in page.sources]
 
@@ -233,7 +303,7 @@ class WikiStore:
             fm["type"] = page_type
         fm["aliases"] = aliases or []
 
-        self.write(title, Page(frontmatter=fm, body=""))
+        self._write_to_disk(title, Page(frontmatter=fm, body=""))
 
     def list_pages(self, *, page_type: str | None = None) -> list[str]:
         """List page titles, optionally filtered by type.

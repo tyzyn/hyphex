@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from hyphex.exceptions import (
     FrontmatterError,
+    HookError,
     HyphexError,
     ParseError,
     SchemaLoadError,
     StoreError,
+)
+from hyphex.hooks import (
+    HookRegistry,
+    SourceDocument,
+    WriteContext,
+    citation_inject,
+    cleanup_and_resolve,
+    register_builtin_hooks,
 )
 from hyphex.models import Citation, Direction, EntityLink, Page, Source
 from hyphex.parser import Parser
@@ -20,6 +29,8 @@ __all__ = [
     "Direction",
     "EntityLink",
     "FrontmatterError",
+    "HookError",
+    "HookRegistry",
     "HyphexError",
     "Page",
     "ParseError",
@@ -29,8 +40,13 @@ __all__ = [
     "SchemaError",
     "SchemaLoadError",
     "Source",
+    "SourceDocument",
     "StoreError",
     "WikiStore",
+    "WriteContext",
     "__version__",
+    "citation_inject",
+    "cleanup_and_resolve",
+    "register_builtin_hooks",
     "slugify",
 ]
