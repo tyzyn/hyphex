@@ -1,0 +1,23 @@
+// Hyphex-flavoured markdown inline grammar.
+// Parses entity links [[...]] and citations {{...}} from body content.
+
+start: (entity_link | citation | TEXT)+
+
+entity_link: "[[" target (DIRECTION relationship ("|" properties)?)? "]]"
+target: TARGET
+relationship: RELATIONSHIP
+properties: prop ("," prop)*
+prop: key "=" value
+key: KEY
+value: VALUE
+
+citation: "{{" source_id "}}"
+source_id: SOURCE_ID
+
+DIRECTION: ">" | "<"
+TARGET: /[^\]><|]+/
+RELATIONSHIP: /[a-z_]+/
+KEY: /[a-z_]+/
+VALUE: /[^,\]]+/
+SOURCE_ID: /[0-9]+/
+TEXT: /(?:(?!\[\[)(?!\{\{).)+/s

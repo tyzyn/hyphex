@@ -9,6 +9,16 @@ wheels/
 # Virtual environments
 .venv
 
+# Test artifacts
+.hypothesis/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
 # Claude Context
 .claude
 claude/
+CLAUDE.md
