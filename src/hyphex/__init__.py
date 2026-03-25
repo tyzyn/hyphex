@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from hyphex.exceptions import FrontmatterError, HyphexError, ParseError
+from hyphex.exceptions import FrontmatterError, HyphexError, ParseError, StoreError
 from hyphex.models import Citation, Direction, EntityLink, Page, Source
 from hyphex.parser import Parser
+from hyphex.store import WikiStore, slugify
 from hyphex.version import __version__
 
 __all__ = [
@@ -17,5 +18,8 @@ __all__ = [
     "ParseError",
     "Parser",
     "Source",
+    "StoreError",
+    "WikiStore",
     "__version__",
+    "slugify",
 ]

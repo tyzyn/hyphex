@@ -18,7 +18,12 @@ htmlcov/
 # Type checking
 .mypy_cache/
 
-# Claude Context
+# Claude context
 .claude
 claude/
 CLAUDE.md
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+notebooks/
+*.ipynb

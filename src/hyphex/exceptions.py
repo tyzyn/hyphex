@@ -27,3 +27,14 @@ class FrontmatterError(ParseError):
     Example:
         >>> raise FrontmatterError("Frontmatter must be a YAML mapping")
     """
+
+
+class StoreError(HyphexError):
+    """Raised when a wiki store operation fails.
+
+    Args:
+        message: Human-readable description of the store failure.
+
+    Example:
+        >>> raise StoreError("Page 'Unknown Topic' does not exist")
+    """
