@@ -27,3 +27,6 @@ CLAUDE.md
 .ipynb_checkpoints/
 notebooks/
 *.ipynb
+
+# Examples (for now)
+examples/

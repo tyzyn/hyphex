@@ -38,6 +38,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agents = [
+    "langchain>=1.2.13",
+    "langchain-core>=1.2.22",
+    "deepagents>=0.4.12",
+    "langchain-google-genai>=4.2.1",
+    "pymupdf>=1.25",
+]
+
 dev = [
     "hypothesis>=6.151.9",
     "jupyterlab>=4.5.6",

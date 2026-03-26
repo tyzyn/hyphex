@@ -1,3 +1,9 @@
+{% if context %}
+## Context
+
+{{ context }}
+
+{% endif %}
 ## Available Entity Types
 {% for name, nt in node_types.items() %}
 {%- set req = nt.fields | dictsort | selectattr("1.required") | map(attribute="0") | list %}

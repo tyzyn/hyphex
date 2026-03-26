@@ -306,6 +306,12 @@ class Schema(BaseModel):
         >>> errors = schema.validate(page)
     """
 
+    context: str = Field(
+        default="",
+        description="Free-text explanation of why this knowledge base exists, "
+        "what the data will be used for, and what to prioritise when extracting. "
+        "Injected into agent prompts to guide extraction decisions.",
+    )
     node_types: dict[str, NodeType] = Field(default_factory=dict)
     relationship_types: dict[str, RelationshipType] = Field(default_factory=dict)
     settings: SchemaSettings = Field(default_factory=SchemaSettings)
@@ -463,6 +469,7 @@ class Schema(BaseModel):
         """
         template = _PROMPTS_ENV.get_template("schema_summary.md.j2")
         return template.render(
+            context=self.context,
             node_types=self.node_types,
             relationship_types=self.relationship_types,
             default_relationship=self.settings.default_relationship,
@@ -487,9 +494,29 @@ class SchemaBuilder:
     """
 
     def __init__(self) -> None:
+        self._context: str = ""
         self._node_types: dict[str, NodeType] = {}
         self._relationship_types: dict[str, RelationshipType] = {}
         self._settings: SchemaSettings = SchemaSettings()
+
+    def set_context(self, context: str) -> SchemaBuilder:
+        """Set the knowledge base context.
+
+        Explains why this knowledge base exists and what to prioritise
+        when extracting information. Injected into agent prompts.
+
+        Args:
+            context: Free-text description.
+
+        Returns:
+            ``self`` for chaining.
+
+        Example:
+            >>> SchemaBuilder().set_context("We are building a knowledge base of...")
+            <...SchemaBuilder...>
+        """
+        self._context = context
+        return self
 
     def add_node_type(self, name: str, *, description: str = "") -> SchemaBuilder:
         """Add a node type to the schema.
@@ -610,6 +637,7 @@ class SchemaBuilder:
             >>> schema = SchemaBuilder().build()
         """
         return Schema(
+            context=self._context,
             node_types=dict(self._node_types),
             relationship_types=dict(self._relationship_types),
             settings=self._settings,
