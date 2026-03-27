@@ -27,7 +27,7 @@ from hyphex.schema import Schema
 
 logger = logging.getLogger(__name__)
 
-_RE_REF = re.compile(r"\{\{ref\}\}")
+_RE_REF = re.compile(r"\{\{ref(?::(\d+))?\}\}")
 _RE_HEADING = re.compile(r"^#+\s+.*$", re.MULTILINE)
 _RE_RELATIONSHIP = re.compile(r"\[\[[^\]]*?([><])([a-z_]+)")
 
@@ -388,28 +388,29 @@ class SchemaValidationMiddleware(AgentMiddleware):
 
 
 class CitationGroundingMiddleware(AgentMiddleware):
-    """Post-write fixup that resolves ``{{ref}}`` markers and manages sources.
+    """Post-write fixup that resolves ``{{ref}}`` and ``{{ref:N}}`` markers.
 
     After any ``write_file`` or ``edit_file`` on an ``.md`` file, reads the
-    page back from disk. If ``{{ref}}`` markers are present, replaces them
-    with the source's citation ID and ensures the source is listed in
-    frontmatter. Writes the corrected file back.
+    page back from disk. If ``{{ref}}`` or ``{{ref:N}}`` markers are present,
+    replaces them with source citation IDs and ensures source entries are in
+    frontmatter. Each unique ``(url, page)`` pair gets its own source ID,
+    enabling page-level citations.
 
     Works identically for ``write_file`` and ``edit_file`` — the agent can
     use whichever tool is natural.
 
     Args:
         wiki_dir: Path to the wiki directory on disk.
-        source_id: Identifier for the source document (stored as ``url``).
+        source_url: URL or path identifying the source document.
         source_title: Human-readable title of the source document.
 
     Example:
-        >>> mw = CitationGroundingMiddleware(Path("./wiki"), "doc_123", "Annual Report 2025")
+        >>> mw = CitationGroundingMiddleware(Path("./wiki"), "/path/to/doc.pdf", "Annual Report")
     """
 
-    def __init__(self, wiki_dir: Path, source_id: str, source_title: str) -> None:
+    def __init__(self, wiki_dir: Path, source_url: str, source_title: str) -> None:
         self._wiki_dir = wiki_dir
-        self._source_id = source_id
+        self._source_url = source_url
         self._source_title = source_title
 
     def wrap_tool_call(
@@ -461,17 +462,20 @@ class CitationGroundingMiddleware(AgentMiddleware):
         return result
 
     def _resolve_citations(self, content: str) -> str:
-        """Replace ``{{ref}}`` markers and ensure source is in frontmatter.
+        """Replace ``{{ref}}`` and ``{{ref:N}}`` markers with source IDs.
+
+        Each unique ``(url, page)`` pair gets its own source entry. Plain
+        ``{{ref}}`` creates a source without a ``page`` field.
 
         Args:
             content: Full page content read from disk.
 
         Returns:
-            Content with ``{{ref}}`` resolved and source entry present.
+            Content with refs resolved and source entries present.
 
         Example:
-            >>> mw._resolve_citations("---\\ntype: person\\nsources: []\\n---\\nBorn {{ref}}.")
-            '---\\ntype: person\\nsources:\\n- id: 1\\n  ...'
+            >>> mw._resolve_citations("---\\nsources: []\\n---\\nFact {{ref:5}}.")
+            '---\\nsources:\\n- id: 1\\n  ...page: 5...'
         """
         try:
             fm_yaml, body = split_frontmatter(content)
@@ -481,28 +485,40 @@ class CitationGroundingMiddleware(AgentMiddleware):
             return content
 
         raw_sources = fm.get("sources", [])
-        # Keep only valid, middleware-managed sources (must have both id and url).
-        # Strips agent-added entries like {"title": "Source Document"}.
         existing_sources: list[dict[str, Any]] = [
             s for s in raw_sources if isinstance(s, dict) and "id" in s and "url" in s
         ]
 
-        # Reuse existing ID for this source, or assign the next one.
-        source_id: int | None = None
+        # Build lookup: (url, page) -> source_id for existing entries.
+        source_lookup: dict[tuple[str, int | None], int] = {}
         for s in existing_sources:
-            if s.get("url") == self._source_id:
-                source_id = s["id"]
-                break
+            key = (s["url"], s.get("page"))
+            source_lookup[key] = s["id"]
 
-        if source_id is None:
-            base_id = max((s["id"] for s in existing_sources), default=0)
-            source_id = base_id + 1
-            existing_sources.append({
-                "id": source_id,
+        next_id = max((s["id"] for s in existing_sources), default=0) + 1
+
+        def _replace(match: re.Match[str]) -> str:
+            nonlocal next_id
+            page_str = match.group(1)
+            page: int | None = int(page_str) if page_str else None
+            key = (self._source_url, page)
+
+            if key in source_lookup:
+                return f"{{{{{source_lookup[key]}}}}}"
+
+            sid = next_id
+            next_id += 1
+            source_lookup[key] = sid
+            entry: dict[str, Any] = {
+                "id": sid,
                 "title": self._source_title,
-                "url": self._source_id,
-            })
+                "url": self._source_url,
+            }
+            if page is not None:
+                entry["page"] = page
+            existing_sources.append(entry)
+            return f"{{{{{sid}}}}}"
 
-        resolved_body = _RE_REF.sub(f"{{{{{source_id}}}}}", body)
+        resolved_body = _RE_REF.sub(_replace, body)
         fm["sources"] = existing_sources
         return serialize_frontmatter(fm, resolved_body)

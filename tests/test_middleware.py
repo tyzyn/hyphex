@@ -394,6 +394,57 @@ class TestCitationGroundingMiddleware:
         assert "{{ref}}" not in resolved_body
         assert len(fm["sources"]) == 1
 
+    def test_page_level_citation(self, tmp_path):
+        mw = self._make_mw(tmp_path)
+        body = "\nFact from page 5 {{ref:5}}. Fact from page 12 {{ref:12}}.\n"
+        content = _page_content({"type": "person", "sources": []}, body)
+        (tmp_path / "test.md").write_text(content, encoding="utf-8")
+
+        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "test.md").read_text()
+        fm_yaml, resolved_body = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert "{{ref" not in resolved_body
+        assert len(fm["sources"]) == 2
+        pages = {s["page"] for s in fm["sources"]}
+        assert pages == {5, 12}
+
+    def test_same_page_reuses_id(self, tmp_path):
+        mw = self._make_mw(tmp_path)
+        body = "\nFirst claim {{ref:5}}. Second claim {{ref:5}}.\n"
+        content = _page_content({"type": "person", "sources": []}, body)
+        (tmp_path / "test.md").write_text(content, encoding="utf-8")
+
+        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "test.md").read_text()
+        fm_yaml, resolved_body = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 1
+        assert resolved_body.count(f"{{{{{fm['sources'][0]['id']}}}}}") == 2
+
+    def test_mixed_ref_and_ref_with_page(self, tmp_path):
+        mw = self._make_mw(tmp_path)
+        body = "\nGeneral claim {{ref}}. Specific claim {{ref:7}}.\n"
+        content = _page_content({"type": "person", "sources": []}, body)
+        (tmp_path / "test.md").write_text(content, encoding="utf-8")
+
+        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "test.md").read_text()
+        fm_yaml, _ = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 2
+        has_page = [s for s in fm["sources"] if "page" in s]
+        no_page = [s for s in fm["sources"] if "page" not in s]
+        assert len(has_page) == 1
+        assert has_page[0]["page"] == 7
+        assert len(no_page) == 1
+
     def test_ignores_non_md_files(self, tmp_path):
         mw = self._make_mw(tmp_path)
         (tmp_path / "data.json").write_text('{"x": "{{ref}}"}', encoding="utf-8")
