@@ -27,7 +27,7 @@ from hyphex.schema import Schema
 
 logger = logging.getLogger(__name__)
 
-_RE_REF = re.compile(r"\{\{ref(?::(\d+))?\}\}")
+_RE_PANDOC_CITE = re.compile(r"\[@(src_\d+)(?:,\s*pp?\.\s*[\d\-]+)?\]")
 _RE_HEADING = re.compile(r"^#+\s+.*$", re.MULTILINE)
 _RE_RELATIONSHIP = re.compile(r"\[\[[^\]]*?([><])([a-z_]+)")
 
@@ -250,7 +250,7 @@ class RejectEmptyPageMiddleware(AgentMiddleware):
         """
         if _is_md_tool_call(request, "write_file"):
             content = request.tool_call["args"].get("content", "")
-            if _RE_REF.search(content):
+            if _RE_PANDOC_CITE.search(content):
                 body = self._extract_body_text(content)
                 if len(body.strip()) < self.MINIMUM_BODY_CHARS:
                     return _reject(
@@ -388,28 +388,29 @@ class SchemaValidationMiddleware(AgentMiddleware):
 
 
 class CitationGroundingMiddleware(AgentMiddleware):
-    """Post-write fixup that resolves ``{{ref}}`` and ``{{ref:N}}`` markers.
+    """Post-write fixup that ensures pandoc-style citations have source entries.
 
     After any ``write_file`` or ``edit_file`` on an ``.md`` file, reads the
-    page back from disk. If ``{{ref}}`` or ``{{ref:N}}`` markers are present,
-    replaces them with source citation IDs and ensures source entries are in
-    frontmatter. Each unique ``(url, page)`` pair gets its own source ID,
-    enabling page-level citations.
-
-    Works identically for ``write_file`` and ``edit_file`` — the agent can
-    use whichever tool is natural.
+    page from disk. If ``[@src_NNN...]`` citations are present for this
+    middleware's source, ensures a corresponding source entry exists in
+    frontmatter. The agent writes complete citations directly — this
+    middleware only manages the frontmatter sources list.
 
     Args:
         wiki_dir: Path to the wiki directory on disk.
-        source_url: URL or path identifying the source document.
+        src_id: Source identifier (e.g. ``"src_001"``).
+        source_url: URL or path to the source document.
         source_title: Human-readable title of the source document.
 
     Example:
-        >>> mw = CitationGroundingMiddleware(Path("./wiki"), "/path/to/doc.pdf", "Annual Report")
+        >>> mw = CitationGroundingMiddleware(Path("./wiki"), "src_001", "/path/to/doc.pdf", "Report")
     """
 
-    def __init__(self, wiki_dir: Path, source_url: str, source_title: str) -> None:
+    def __init__(
+        self, wiki_dir: Path, src_id: str, source_url: str, source_title: str
+    ) -> None:
         self._wiki_dir = wiki_dir
+        self._src_id = src_id
         self._source_url = source_url
         self._source_title = source_title
 
@@ -418,7 +419,7 @@ class CitationGroundingMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage],
     ) -> ToolMessage:
-        """Let the write/edit proceed, then fix up citations on disk.
+        """Let the write/edit proceed, then ensure source is in frontmatter.
 
         Args:
             request: The incoming tool call request.
@@ -430,20 +431,20 @@ class CitationGroundingMiddleware(AgentMiddleware):
         Example:
             >>> result = mw.wrap_tool_call(request, handler)
         """
-        # Fast exit: check request content for {{ref}} before any disk I/O.
         tool_name = request.tool_call["name"]
         file_path = _get_file_path(request)
         args = request.tool_call["args"]
 
-        has_ref = False
+        # Fast exit: check request content for [@...] before any disk I/O.
+        has_cite = False
         if tool_name == "write_file" and file_path.endswith(".md"):
-            has_ref = bool(_RE_REF.search(args.get("content", "")))
+            has_cite = "[@" in args.get("content", "")
         elif tool_name == "edit_file" and file_path.endswith(".md"):
-            has_ref = bool(_RE_REF.search(args.get("new_string", "")))
+            has_cite = "[@" in args.get("new_string", "")
 
         result = handler(request)
 
-        if not has_ref:
+        if not has_cite:
             return result
 
         filename = _extract_filename(file_path)
@@ -454,71 +455,55 @@ class CitationGroundingMiddleware(AgentMiddleware):
         except (FileNotFoundError, OSError):
             return result
 
-        if not _RE_REF.search(content):
-            return result
-
-        fixed = self._resolve_citations(content)
-        disk_path.write_text(fixed, encoding="utf-8")
+        fixed = self._ensure_source_entry(content)
+        if fixed is not None:
+            disk_path.write_text(fixed, encoding="utf-8")
         return result
 
-    def _resolve_citations(self, content: str) -> str:
-        """Replace ``{{ref}}`` and ``{{ref:N}}`` markers with source IDs.
-
-        Each unique ``(url, page)`` pair gets its own source entry. Plain
-        ``{{ref}}`` creates a source without a ``page`` field.
+    def _ensure_source_entry(self, content: str) -> str | None:
+        """Ensure frontmatter has a source entry if the body cites this source.
 
         Args:
             content: Full page content read from disk.
 
         Returns:
-            Content with refs resolved and source entries present.
+            Updated content if changes were made, or ``None`` if no changes needed.
 
         Example:
-            >>> mw._resolve_citations("---\\nsources: []\\n---\\nFact {{ref:5}}.")
-            '---\\nsources:\\n- id: 1\\n  ...page: 5...'
+            >>> mw._ensure_source_entry("---\\nsources: []\\n---\\nClaim [@src_001, p. 5].")
+            '---\\nsources:\\n- id: src_001\\n  ...'
         """
         try:
             fm_yaml, body = split_frontmatter(content)
             fm = parse_frontmatter(fm_yaml)
         except FrontmatterError:
             logger.warning("Could not parse frontmatter for citation grounding")
-            return content
+            return None
+
+        # Check if our src_id is cited in the body.
+        cited_ids = {m.group(1) for m in _RE_PANDOC_CITE.finditer(body)}
+        if self._src_id not in cited_ids:
+            return None
 
         raw_sources = fm.get("sources", [])
+        # Keep only valid entries (dict with id and url).
         existing_sources: list[dict[str, Any]] = [
             s for s in raw_sources if isinstance(s, dict) and "id" in s and "url" in s
         ]
 
-        # Build lookup: (url, page) -> source_id for existing entries.
-        source_lookup: dict[tuple[str, int | None], int] = {}
-        for s in existing_sources:
-            key = (s["url"], s.get("page"))
-            source_lookup[key] = s["id"]
+        # Check if source already exists.
+        if any(s["id"] == self._src_id for s in existing_sources):
+            # Source exists — only rewrite if we stripped invalid entries.
+            if len(existing_sources) == len(raw_sources):
+                return None
+            fm["sources"] = existing_sources
+            return serialize_frontmatter(fm, body)
 
-        next_id = max((s["id"] for s in existing_sources), default=0) + 1
-
-        def _replace(match: re.Match[str]) -> str:
-            nonlocal next_id
-            page_str = match.group(1)
-            page: int | None = int(page_str) if page_str else None
-            key = (self._source_url, page)
-
-            if key in source_lookup:
-                return f"{{{{{source_lookup[key]}}}}}"
-
-            sid = next_id
-            next_id += 1
-            source_lookup[key] = sid
-            entry: dict[str, Any] = {
-                "id": sid,
-                "title": self._source_title,
-                "url": self._source_url,
-            }
-            if page is not None:
-                entry["page"] = page
-            existing_sources.append(entry)
-            return f"{{{{{sid}}}}}"
-
-        resolved_body = _RE_REF.sub(_replace, body)
+        # Add the source entry.
+        existing_sources.append({
+            "id": self._src_id,
+            "title": self._source_title,
+            "url": self._source_url,
+        })
         fm["sources"] = existing_sources
-        return serialize_frontmatter(fm, resolved_body)
+        return serialize_frontmatter(fm, body)

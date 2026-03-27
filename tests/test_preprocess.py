@@ -25,28 +25,42 @@ def _create_pdf(path: Path, pages: list[str]) -> None:
 
 
 class TestPrepareDocument:
-    def test_creates_page_files(self, tmp_path):
+    def test_auto_assigns_src_001(self, tmp_path):
         pdf = tmp_path / "report.pdf"
         _create_pdf(pdf, ["Page one content", "Page two content"])
 
         workspace = tmp_path / "workspace"
         doc_id = prepare_document(pdf, workspace)
 
-        assert doc_id == "report"
-        doc_dir = workspace / "docs" / "report"
+        assert doc_id == "src_001"
+        doc_dir = workspace / "docs" / "src_001"
         assert (doc_dir / "page_001.md").is_file()
         assert (doc_dir / "page_002.md").is_file()
         assert "Page one content" in (doc_dir / "page_001.md").read_text()
 
-    def test_creates_meta_yml(self, tmp_path):
+    def test_increments_src_id(self, tmp_path):
+        workspace = tmp_path / "workspace"
+
+        pdf1 = tmp_path / "first.pdf"
+        _create_pdf(pdf1, ["Content"])
+        id1 = prepare_document(pdf1, workspace)
+        assert id1 == "src_001"
+
+        pdf2 = tmp_path / "second.pdf"
+        _create_pdf(pdf2, ["Content"])
+        id2 = prepare_document(pdf2, workspace)
+        assert id2 == "src_002"
+
+    def test_meta_yml_has_src_id(self, tmp_path):
         pdf = tmp_path / "my_document.pdf"
         _create_pdf(pdf, ["Content"])
 
         workspace = tmp_path / "workspace"
-        prepare_document(pdf, workspace)
+        doc_id = prepare_document(pdf, workspace)
 
-        meta_path = workspace / "docs" / "my_document" / "_meta.yml"
+        meta_path = workspace / "docs" / doc_id / "_meta.yml"
         meta = yaml.safe_load(meta_path.read_text())
+        assert meta["src_id"] == "src_001"
         assert meta["page_count"] == 1
         assert meta["pages_with_text"] == 1
         assert meta["url"] == str(pdf.resolve())
@@ -73,9 +87,9 @@ class TestPrepareDocument:
         doc.close()
 
         workspace = tmp_path / "workspace"
-        prepare_document(pdf, workspace)
+        doc_id = prepare_document(pdf, workspace)
 
-        doc_dir = workspace / "docs" / "sparse"
+        doc_dir = workspace / "docs" / doc_id
         meta = yaml.safe_load((doc_dir / "_meta.yml").read_text())
         assert meta["page_count"] == 3
         assert meta["pages_with_text"] == 2
@@ -92,8 +106,8 @@ class TestPrepareDocument:
         _create_pdf(pdf, [f"Page {i}" for i in range(1, 15)])
 
         workspace = tmp_path / "workspace"
-        prepare_document(pdf, workspace)
+        doc_id = prepare_document(pdf, workspace)
 
-        doc_dir = workspace / "docs" / "long"
+        doc_dir = workspace / "docs" / doc_id
         assert (doc_dir / "page_001.md").is_file()
         assert (doc_dir / "page_014.md").is_file()

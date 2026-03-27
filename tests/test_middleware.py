@@ -137,12 +137,12 @@ class TestRejectEmptyPageMiddleware:
         mw.wrap_tool_call(request, handler)
         handler.assert_called_once()
 
-    def test_allows_page_with_refs_and_content(self):
+    def test_allows_page_with_citations_and_content(self):
         mw = RejectEmptyPageMiddleware()
         body = (
             "\n# Michelle Obama\n\n"
             "Michelle LaVaughn Robinson Obama is an American attorney and author "
-            "who served as the first lady of the United States. {{ref}}\n"
+            "who served as the first lady of the United States. [@src_001, p. 1]\n"
         )
         content = _page_content({"type": "person", "sources": []}, body)
         request = _make_request("write_file", {"file_path": "michelle_obama.md", "content": content})
@@ -150,9 +150,9 @@ class TestRejectEmptyPageMiddleware:
         mw.wrap_tool_call(request, handler)
         handler.assert_called_once()
 
-    def test_rejects_page_with_refs_but_empty_body(self):
+    def test_rejects_page_with_citations_but_empty_body(self):
         mw = RejectEmptyPageMiddleware()
-        body = "\n# Title\n\n{{ref}}\n"
+        body = "\n# Title\n\n[@src_001, p. 1]\n"
         content = _page_content({"type": "person"}, body)
         request = _make_request("write_file", {"file_path": "empty.md", "content": content})
         handler = _make_handler()
@@ -163,7 +163,7 @@ class TestRejectEmptyPageMiddleware:
     def test_allows_edit_file_always(self):
         mw = RejectEmptyPageMiddleware()
         request = _make_request(
-            "edit_file", {"file_path": "x.md", "old_string": "a", "new_string": "{{ref}}"}
+            "edit_file", {"file_path": "x.md", "old_string": "a", "new_string": "[@src_001]"}
         )
         handler = _make_handler()
         mw.wrap_tool_call(request, handler)
@@ -275,40 +275,16 @@ class TestSchemaValidationMiddleware:
 
 
 class TestCitationGroundingMiddleware:
-    """Tests for post-write citation fixup on disk."""
+    """Tests for post-write pandoc citation source management."""
 
     def _make_mw(self, tmp_path):
-        return CitationGroundingMiddleware(tmp_path, "https://example.com/doc", "My Document")
+        return CitationGroundingMiddleware(
+            tmp_path, "src_001", "https://example.com/doc", "My Document"
+        )
 
-    def _write_page(self, tmp_path, filename, frontmatter, body):
-        """Write a page to the tmp wiki dir and return a handler that simulates the write."""
-        content = _page_content(frontmatter, body)
-        (tmp_path / filename).write_text(content, encoding="utf-8")
-
-        def handler(req):
-            result = MagicMock()
-            result.content = "ok"
-            return result
-
-        return handler
-
-    def test_resolves_refs_on_write_file(self, tmp_path):
+    def test_adds_source_on_write(self, tmp_path):
         mw = self._make_mw(tmp_path)
-        body = "\nFact one {{ref}}. Fact two {{ref}}.\n"
-        content = _page_content({"type": "person", "sources": []}, body)
-        (tmp_path / "test.md").write_text(content, encoding="utf-8")
-
-        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
-        mw.wrap_tool_call(request, _make_handler())
-
-        fixed = (tmp_path / "test.md").read_text()
-        _, resolved_body = split_frontmatter(fixed)
-        assert resolved_body.count("{{1}}") == 2
-        assert "{{ref}}" not in resolved_body
-
-    def test_adds_source_to_frontmatter(self, tmp_path):
-        mw = self._make_mw(tmp_path)
-        body = "\nClaim {{ref}}.\n"
+        body = "\nClaim [@src_001, p. 5].\n"
         content = _page_content({"type": "person", "sources": []}, body)
         (tmp_path / "test.md").write_text(content, encoding="utf-8")
 
@@ -319,31 +295,32 @@ class TestCitationGroundingMiddleware:
         fm_yaml, _ = split_frontmatter(fixed)
         fm = parse_frontmatter(fm_yaml)
         assert len(fm["sources"]) == 1
-        assert fm["sources"][0]["id"] == 1
+        assert fm["sources"][0]["id"] == "src_001"
         assert fm["sources"][0]["title"] == "My Document"
         assert fm["sources"][0]["url"] == "https://example.com/doc"
 
-    def test_increments_from_existing_sources(self, tmp_path):
-        mw = CitationGroundingMiddleware(tmp_path, "doc_2", "Second Source")
-        existing = [{"id": 1, "title": "First", "url": "http://first.com"}]
-        body = "\nNew claim {{ref}}.\n"
-        content = _page_content({"type": "person", "sources": existing}, body)
-        (tmp_path / "page.md").write_text(content, encoding="utf-8")
-
-        request = _make_request("write_file", {"file_path": "/page.md", "content": content})
-        mw.wrap_tool_call(request, _make_handler())
-
-        fixed = (tmp_path / "page.md").read_text()
-        fm_yaml, resolved_body = split_frontmatter(fixed)
-        fm = parse_frontmatter(fm_yaml)
-        assert "{{2}}" in resolved_body
-        assert len(fm["sources"]) == 2
-        assert fm["sources"][1]["id"] == 2
-
-    def test_reuses_id_for_same_source(self, tmp_path):
+    def test_adds_source_on_edit(self, tmp_path):
         mw = self._make_mw(tmp_path)
-        existing = [{"id": 1, "title": "My Document", "url": "https://example.com/doc"}]
-        body = "\nAnother fact {{ref}}.\n"
+        body = "\nOld content.\n\nNew fact [@src_001, p. 3].\n"
+        content = _page_content({"type": "person", "sources": []}, body)
+        (tmp_path / "page.md").write_text(content, encoding="utf-8")
+
+        request = _make_request(
+            "edit_file",
+            {"file_path": "/page.md", "old_string": "x", "new_string": "[@src_001, p. 3]"},
+        )
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "page.md").read_text()
+        fm_yaml, _ = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 1
+        assert fm["sources"][0]["id"] == "src_001"
+
+    def test_does_not_duplicate_existing_source(self, tmp_path):
+        mw = self._make_mw(tmp_path)
+        existing = [{"id": "src_001", "title": "My Document", "url": "https://example.com/doc"}]
+        body = "\nAnother fact [@src_001, p. 10].\n"
         content = _page_content({"type": "person", "sources": existing}, body)
         (tmp_path / "page.md").write_text(content, encoding="utf-8")
 
@@ -351,12 +328,30 @@ class TestCitationGroundingMiddleware:
         mw.wrap_tool_call(request, _make_handler())
 
         fixed = (tmp_path / "page.md").read_text()
-        fm_yaml, resolved_body = split_frontmatter(fixed)
+        fm_yaml, _ = split_frontmatter(fixed)
         fm = parse_frontmatter(fm_yaml)
-        assert "{{1}}" in resolved_body
-        assert len(fm["sources"]) == 1  # no duplicate
+        assert len(fm["sources"]) == 1
 
-    def test_no_fixup_without_refs(self, tmp_path):
+    def test_preserves_other_sources(self, tmp_path):
+        mw = CitationGroundingMiddleware(
+            tmp_path, "src_002", "https://other.com", "Other Doc"
+        )
+        existing = [{"id": "src_001", "title": "First", "url": "https://first.com"}]
+        body = "\nClaim from second source [@src_002, p. 1].\n"
+        content = _page_content({"type": "person", "sources": existing}, body)
+        (tmp_path / "page.md").write_text(content, encoding="utf-8")
+
+        request = _make_request("write_file", {"file_path": "/page.md", "content": content})
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "page.md").read_text()
+        fm_yaml, _ = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 2
+        ids = {s["id"] for s in fm["sources"]}
+        assert ids == {"src_001", "src_002"}
+
+    def test_no_fixup_without_citations(self, tmp_path):
         mw = self._make_mw(tmp_path)
         body = "\nNo citations here.\n"
         content = _page_content({"type": "person", "sources": []}, body)
@@ -365,70 +360,28 @@ class TestCitationGroundingMiddleware:
         request = _make_request("write_file", {"file_path": "/clean.md", "content": content})
         mw.wrap_tool_call(request, _make_handler())
 
-        # File should be unchanged — no sources added
         after = (tmp_path / "clean.md").read_text()
         assert after == content
 
-    def test_resolves_refs_in_edit_file(self, tmp_path):
+    def test_strips_invalid_source_entries(self, tmp_path):
         mw = self._make_mw(tmp_path)
-        # Existing page with no refs
-        body = "\nOld content.\n"
-        content = _page_content({"type": "person", "sources": []}, body)
-        (tmp_path / "person.md").write_text(content, encoding="utf-8")
+        invalid = [{"title": "Source Document"}, {"id": "src_001", "url": "https://example.com/doc", "title": "My Document"}]
+        body = "\nFact [@src_001, p. 1].\n"
+        content = _page_content({"type": "person", "sources": invalid}, body)
+        (tmp_path / "page.md").write_text(content, encoding="utf-8")
 
-        # Simulate edit_file that adds a ref — the handler writes the patched file
-        new_body = "\nOld content.\n\nNew fact {{ref}}.\n"
-        new_content = _page_content({"type": "person", "sources": []}, new_body)
-        (tmp_path / "person.md").write_text(new_content, encoding="utf-8")
-
-        request = _make_request(
-            "edit_file",
-            {"file_path": "/person.md", "old_string": "x", "new_string": "New fact {{ref}}."},
-        )
+        request = _make_request("write_file", {"file_path": "/page.md", "content": content})
         mw.wrap_tool_call(request, _make_handler())
 
-        fixed = (tmp_path / "person.md").read_text()
-        fm_yaml, resolved_body = split_frontmatter(fixed)
-        fm = parse_frontmatter(fm_yaml)
-        assert "{{1}}" in resolved_body
-        assert "{{ref}}" not in resolved_body
-        assert len(fm["sources"]) == 1
-
-    def test_page_level_citation(self, tmp_path):
-        mw = self._make_mw(tmp_path)
-        body = "\nFact from page 5 {{ref:5}}. Fact from page 12 {{ref:12}}.\n"
-        content = _page_content({"type": "person", "sources": []}, body)
-        (tmp_path / "test.md").write_text(content, encoding="utf-8")
-
-        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
-        mw.wrap_tool_call(request, _make_handler())
-
-        fixed = (tmp_path / "test.md").read_text()
-        fm_yaml, resolved_body = split_frontmatter(fixed)
-        fm = parse_frontmatter(fm_yaml)
-        assert "{{ref" not in resolved_body
-        assert len(fm["sources"]) == 2
-        pages = {s["page"] for s in fm["sources"]}
-        assert pages == {5, 12}
-
-    def test_same_page_reuses_id(self, tmp_path):
-        mw = self._make_mw(tmp_path)
-        body = "\nFirst claim {{ref:5}}. Second claim {{ref:5}}.\n"
-        content = _page_content({"type": "person", "sources": []}, body)
-        (tmp_path / "test.md").write_text(content, encoding="utf-8")
-
-        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
-        mw.wrap_tool_call(request, _make_handler())
-
-        fixed = (tmp_path / "test.md").read_text()
-        fm_yaml, resolved_body = split_frontmatter(fixed)
+        fixed = (tmp_path / "page.md").read_text()
+        fm_yaml, _ = split_frontmatter(fixed)
         fm = parse_frontmatter(fm_yaml)
         assert len(fm["sources"]) == 1
-        assert resolved_body.count(f"{{{{{fm['sources'][0]['id']}}}}}") == 2
+        assert fm["sources"][0]["id"] == "src_001"
 
-    def test_mixed_ref_and_ref_with_page(self, tmp_path):
+    def test_citation_without_page_number(self, tmp_path):
         mw = self._make_mw(tmp_path)
-        body = "\nGeneral claim {{ref}}. Specific claim {{ref:7}}.\n"
+        body = "\nGeneral claim [@src_001].\n"
         content = _page_content({"type": "person", "sources": []}, body)
         (tmp_path / "test.md").write_text(content, encoding="utf-8")
 
@@ -438,17 +391,25 @@ class TestCitationGroundingMiddleware:
         fixed = (tmp_path / "test.md").read_text()
         fm_yaml, _ = split_frontmatter(fixed)
         fm = parse_frontmatter(fm_yaml)
-        assert len(fm["sources"]) == 2
-        has_page = [s for s in fm["sources"] if "page" in s]
-        no_page = [s for s in fm["sources"] if "page" not in s]
-        assert len(has_page) == 1
-        assert has_page[0]["page"] == 7
-        assert len(no_page) == 1
+        assert len(fm["sources"]) == 1
+
+    def test_page_range_citation(self, tmp_path):
+        mw = self._make_mw(tmp_path)
+        body = "\nSpanning claim [@src_001, pp. 12-15].\n"
+        content = _page_content({"type": "person", "sources": []}, body)
+        (tmp_path / "test.md").write_text(content, encoding="utf-8")
+
+        request = _make_request("write_file", {"file_path": "/test.md", "content": content})
+        mw.wrap_tool_call(request, _make_handler())
+
+        fixed = (tmp_path / "test.md").read_text()
+        fm_yaml, _ = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 1
 
     def test_ignores_non_md_files(self, tmp_path):
         mw = self._make_mw(tmp_path)
-        (tmp_path / "data.json").write_text('{"x": "{{ref}}"}', encoding="utf-8")
-        request = _make_request("write_file", {"file_path": "/data.json", "content": "{{ref}}"})
+        request = _make_request("write_file", {"file_path": "/data.json", "content": "[@src_001]"})
         handler = _make_handler()
         mw.wrap_tool_call(request, handler)
         handler.assert_called_once_with(request)
@@ -466,7 +427,7 @@ class TestMiddlewareChain:
             RequireStubMiddleware(blessed),
             RejectEmptyPageMiddleware(),
             SchemaValidationMiddleware(schema),
-            CitationGroundingMiddleware(tmp_path, "doc_1", "Source"),
+            CitationGroundingMiddleware(tmp_path, "src_001", "doc_1", "Source"),
         ]
 
         content = _page_content({"type": "person"}, "\n# Test\n\n")
@@ -490,18 +451,18 @@ class TestMiddlewareChain:
             RequireStubMiddleware(blessed),
             RejectEmptyPageMiddleware(),
             SchemaValidationMiddleware(schema),
-            CitationGroundingMiddleware(tmp_path, "doc_1", "Source"),
+            CitationGroundingMiddleware(tmp_path, "src_001", "doc_1", "Source"),
         ]
 
         body = (
             "\n# Good Page\n\n"
-            "This is a well-written page with real content about the topic. {{ref}}\n"
+            "This is a well-written page with real content about the topic. "
+            "[@src_001, p. 1]\n"
         )
         content = _page_content({"type": "person", "sources": []}, body)
         request = _make_request("write_file", {"file_path": "/good_page.md", "content": content})
 
         def write_handler(req):
-            """Simulate the actual write to disk so post-write fixup can read it."""
             (tmp_path / "good_page.md").write_text(
                 req.tool_call["args"]["content"], encoding="utf-8"
             )
@@ -518,7 +479,8 @@ class TestMiddlewareChain:
 
         run_chain(chain, request, write_handler)
 
-        # Post-write fixup should have resolved citations on disk
         fixed = (tmp_path / "good_page.md").read_text()
-        assert "{{ref}}" not in fixed
-        assert "{{1}}" in fixed
+        fm_yaml, _ = split_frontmatter(fixed)
+        fm = parse_frontmatter(fm_yaml)
+        assert len(fm["sources"]) == 1
+        assert fm["sources"][0]["id"] == "src_001"

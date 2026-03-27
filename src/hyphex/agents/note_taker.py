@@ -30,7 +30,7 @@ def create_hyphex_agent(
     schema_path: str | Path,
     doc_id: str,
     *,
-    model: str = "gemini-3.1-flash-lite-preview",
+    model: str = "gemini-3-flash-preview",
 ) -> CompiledStateGraph:
     """Create a document-exploring Hyphex note-taking agent.
 
@@ -62,6 +62,7 @@ def create_hyphex_agent(
     # Read document metadata.
     meta_path = docs_dir / doc_id / "_meta.yml"
     meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+    src_id = meta.get("src_id", doc_id)
     source_url = meta.get("url", str(docs_dir / doc_id))
     source_title = meta.get("title", doc_id)
 
@@ -74,6 +75,7 @@ def create_hyphex_agent(
     system_prompt = template.render(
         schema_summary=schema.to_prompt(),
         doc_id=doc_id,
+        src_id=src_id,
     )
 
     middleware = [
@@ -81,7 +83,7 @@ def create_hyphex_agent(
         RequireStubMiddleware(blessed_paths, wiki_dir=wiki_dir),
         RejectEmptyPageMiddleware(),
         SchemaValidationMiddleware(schema),
-        CitationGroundingMiddleware(wiki_dir, source_url, source_title),
+        CitationGroundingMiddleware(wiki_dir, src_id, source_url, source_title),
     ]
 
     llm = ChatGoogleGenerativeAI(model=model)
