@@ -135,7 +135,7 @@ class TestReadWrite:
         page = Page(
             frontmatter={"type": "case_study"},
             body="Content. {{1}}",
-            sources=[Source(id=1, title="Doc", url="https://example.com")],
+            sources=[Source(id="src_001", title="Doc", url="https://example.com")],
         )
         store.write("Project X", page)
         read_back = store.read("Project X")

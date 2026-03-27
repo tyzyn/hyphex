@@ -248,8 +248,6 @@ def _check_relationships(
     errors: list[SchemaError] = []
     page_type = page.frontmatter.get("type")
     for link in page.entity_links:
-        if link.is_default or link.relationship is None:
-            continue
         rel_name = link.relationship
         if rel_name not in schema.relationship_types:
             errors.append(
@@ -271,22 +269,6 @@ def _check_relationships(
                         severity=severity,
                     )
                 )
-    return errors
-
-
-def _check_default_relationships(page: Page, schema: Schema) -> list[SchemaError]:
-    errors: list[SchemaError] = []
-    for link in page.entity_links:
-        if link.is_default:
-            errors.append(
-                SchemaError(
-                    message=(
-                        f"Link to '{link.target}' uses default relationship"
-                        f" '{schema.settings.default_relationship}'"
-                    ),
-                    severity="warning",
-                )
-            )
     return errors
 
 
@@ -415,8 +397,6 @@ class Schema(BaseModel):
         errors.extend(_check_required_fields(page, self, severity))
         errors.extend(_check_field_values(page, self, severity))
         errors.extend(_check_relationships(page, self, severity))
-        if self.settings.warn_on_default_relationship:
-            errors.extend(_check_default_relationships(page, self))
         return errors
 
     def valid_relationships(

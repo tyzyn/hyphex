@@ -18,7 +18,7 @@ from hyphex import (
     cleanup_and_resolve,
     register_builtin_hooks,
 )
-from hyphex.models import Citation, Direction, EntityLink
+from hyphex.models import Citation, EntityLink
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ def _ctx(
         body=body,
         entity_links=entity_links or [],
         citations=citations or [],
+        evidence_blocks=[],
     )
     return WriteContext(title=title, page=page, source_document=source_document, **kwargs)  # type: ignore[arg-type]
 
@@ -49,7 +50,7 @@ class TestSourceDocument:
     def test_basic(self) -> None:
         doc = SourceDocument(url="https://example.com", title="Report")
         assert doc.url == "https://example.com"
-        assert doc.page is None
+        assert doc.section is None
 
     def test_all_fields(self) -> None:
         doc = SourceDocument(
@@ -201,25 +202,25 @@ class TestCitationInject:
         result = citation_inject(ctx)
         sources = result.page.frontmatter["sources"]
         assert len(sources) == 1
-        assert sources[0]["id"] == 1
+        assert sources[0]["id"] == "src_001"
         assert sources[0]["title"] == "Report"
 
     def test_incremental_id(self) -> None:
         doc = SourceDocument(url="https://example.com", title="New")
         ctx = _ctx(
             source_document=doc,
-            frontmatter={"sources": [{"id": 1, "title": "Old", "url": "https://old.com"}]},
+            frontmatter={"sources": [{"id": "src_001", "title": "Old", "url": "https://old.com"}]},
         )
         result = citation_inject(ctx)
         sources = result.page.frontmatter["sources"]
         assert len(sources) == 2
-        assert sources[1]["id"] == 2
+        assert sources[1]["id"] == "src_002"
 
     def test_citation_hint(self) -> None:
         doc = SourceDocument(url="https://example.com", title="Report")
         ctx = _ctx(source_document=doc)
         result = citation_inject(ctx)
-        assert result.agent_context["citation_hint"] == "{{1}}"
+        assert result.agent_context["citation_hint"] == "[@src_001]"
 
     def test_optional_fields_included(self) -> None:
         doc = SourceDocument(
@@ -247,11 +248,11 @@ class TestCitationInject:
 class TestCleanupAndResolve:
     def test_removes_uncited_sources(self) -> None:
         ctx = _ctx(
-            body="Cited. {{1}}",
+            body="Cited. [@src_001]",
             frontmatter={
                 "sources": [
-                    {"id": 1, "title": "Cited", "url": "https://a.com"},
-                    {"id": 2, "title": "Uncited", "url": "https://b.com"},
+                    {"id": "src_001", "title": "Cited", "url": "https://a.com"},
+                    {"id": "src_002", "title": "Uncited", "url": "https://b.com"},
                 ]
             },
         )
@@ -260,28 +261,27 @@ class TestCleanupAndResolve:
         assert len(sources) == 1
         assert sources[0]["title"] == "Cited"
 
-    def test_renumbers_sequentially(self) -> None:
+    def test_removes_uncited_keeps_cited(self) -> None:
         ctx = _ctx(
-            body="First. {{1}} Third. {{3}}",
+            body="First. [@src_001] Third. [@src_003]",
             frontmatter={
                 "sources": [
-                    {"id": 1, "title": "A", "url": "https://a.com"},
-                    {"id": 2, "title": "B", "url": "https://b.com"},
-                    {"id": 3, "title": "C", "url": "https://c.com"},
+                    {"id": "src_001", "title": "A", "url": "https://a.com"},
+                    {"id": "src_002", "title": "B", "url": "https://b.com"},
+                    {"id": "src_003", "title": "C", "url": "https://c.com"},
                 ]
             },
         )
         result = cleanup_and_resolve(ctx)
         sources = result.page.frontmatter["sources"]
-        assert [s["id"] for s in sources] == [1, 2]
-        assert "{{1}}" in result.page.body
-        assert "{{2}}" in result.page.body
-        assert "{{3}}" not in result.page.body
+        assert [s["id"] for s in sources] == ["src_001", "src_003"]
+        assert "[@src_001]" in result.page.body
+        assert "[@src_003]" in result.page.body
 
     def test_creates_stubs(self, tmp_path: Path) -> None:
         store = WikiStore(tmp_path)
-        links = [EntityLink(target="Python", direction=Direction.OUTGOING, relationship="uses")]
-        ctx = _ctx(body="[[Python>uses]]", entity_links=links, store=store)
+        links = [EntityLink(target="Python", relationship="uses")]
+        ctx = _ctx(body="[Python](rel:uses)", entity_links=links, store=store)
         cleanup_and_resolve(ctx)
         assert store.exists("Python")
 
@@ -290,8 +290,8 @@ class TestCleanupAndResolve:
         store.create_stub("Python", page_type="technology")
         original = store.read("Python")
 
-        links = [EntityLink(target="Python", direction=Direction.OUTGOING, relationship="uses")]
-        ctx = _ctx(body="[[Python>uses]]", entity_links=links, store=store)
+        links = [EntityLink(target="Python", relationship="uses")]
+        ctx = _ctx(body="[Python](rel:uses)", entity_links=links, store=store)
         cleanup_and_resolve(ctx)
         after = store.read("Python")
         assert after.frontmatter["type"] == original.frontmatter["type"]
@@ -303,7 +303,7 @@ class TestCleanupAndResolve:
         assert any("Unknown node type" in w for w in result.warnings)
 
     def test_works_without_parser(self) -> None:
-        ctx = _ctx(body="Fact. {{1}}", frontmatter={"sources": [{"id": 1, "title": "A", "url": "https://a.com"}]})
+        ctx = _ctx(body="Fact. [@src_001]", frontmatter={"sources": [{"id": "src_001", "title": "A", "url": "https://a.com"}]})
         result = cleanup_and_resolve(ctx)
         assert len(result.page.frontmatter["sources"]) == 1
 
@@ -321,11 +321,11 @@ class TestCleanupAndResolve:
     def test_with_parser(self) -> None:
         parser = Parser()
         ctx = _ctx(
-            body="Fact. {{1}} Link to [[Python>uses]].",
+            body="Fact. [@src_001] Link to [Python](rel:uses).",
             frontmatter={
                 "sources": [
-                    {"id": 1, "title": "A", "url": "https://a.com"},
-                    {"id": 2, "title": "B", "url": "https://b.com"},
+                    {"id": "src_001", "title": "A", "url": "https://a.com"},
+                    {"id": "src_002", "title": "B", "url": "https://b.com"},
                 ]
             },
             parser=parser,
@@ -396,9 +396,9 @@ class TestWikiStoreHookIntegration:
         register_builtin_hooks(registry)
         doc = SourceDocument(url="https://example.com", title="Report")
         store = WikiStore(tmp_path, hooks=registry)
-        ctx = store.write("Test", Page(body="Fact. {{1}}"), source_document=doc)
+        ctx = store.write("Test", Page(body="Fact. [@src_001]"), source_document=doc)
         assert ctx is not None
-        assert ctx.agent_context["citation_hint"] == "{{1}}"
+        assert ctx.agent_context["citation_hint"] == "[@src_001]"
 
     def test_warnings_accessible(self, tmp_path: Path) -> None:
         registry = HookRegistry()
@@ -422,12 +422,12 @@ class TestWikiStoreHookIntegration:
         doc = SourceDocument(url="https://example.com/report.pdf", title="Q4 Report", page=5)
         ctx = store.write(
             "HMRC Project",
-            Page(body="The team delivered results. {{1}}\nUsing [[Python>implemented_in]]."),
+            Page(body="The team delivered results. [@src_001]\nUsing [Python](rel:implemented_in)."),
             source_document=doc,
         )
 
         assert ctx is not None
-        assert ctx.agent_context["citation_hint"] == "{{1}}"
+        assert ctx.agent_context["citation_hint"] == "[@src_001]"
 
         page = store.read("HMRC Project")
         sources = page.frontmatter.get("sources", [])

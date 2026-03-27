@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from hyphex import (
-    Direction,
     EntityLink,
     Page,
     Schema,
@@ -307,21 +306,13 @@ class TestValidation:
         assert any("must be an integer" in e.message for e in errors)
 
     def test_unknown_relationship(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="X",
-            direction=Direction.OUTGOING,
-            relationship="nonexistent",
-        )
+        link = EntityLink(target="X", relationship="nonexistent")
         page = _make_page(page_type="project", entity_links=[link])
         errors = spec_schema.validate(page)
         assert any("Unknown relationship 'nonexistent'" in e.message for e in errors)
 
     def test_known_relationship(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="HMRC",
-            direction=Direction.OUTGOING,
-            relationship="client",
-        )
+        link = EntityLink(target="HMRC", relationship="client")
         page = _make_page(
             page_type="project",
             frontmatter={"client": "[[HMRC]]", "status": "won"},
@@ -331,46 +322,16 @@ class TestValidation:
         assert not any("Unknown relationship" in e.message for e in errors)
 
     def test_relationship_from_constraint_violated(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="HMRC",
-            direction=Direction.OUTGOING,
-            relationship="client",
-        )
+        link = EntityLink(target="HMRC", relationship="client")
         page = _make_page(page_type="person", entity_links=[link])
         errors = spec_schema.validate(page)
         assert any("not allowed from type 'person'" in e.message for e in errors)
 
     def test_relationship_from_unconstrained(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="Alice",
-            direction=Direction.INCOMING,
-            relationship="authored_by",
-        )
+        link = EntityLink(target="Alice", relationship="authored_by")
         page = _make_page(page_type="project", entity_links=[link])
         errors = spec_schema.validate(page)
         assert not any("not allowed from" in e.message for e in errors)
-
-    def test_default_relationship_warning(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="ML",
-            relationship="relates_to",
-            is_default=True,
-        )
-        page = _make_page(entity_links=[link])
-        errors = spec_schema.validate(page)
-        assert any("default relationship" in e.message for e in errors)
-        assert all(e.severity == "warning" for e in errors if "default" in e.message)
-
-    def test_default_relationship_no_warning(self, spec_schema: Schema) -> None:
-        spec_schema.settings.warn_on_default_relationship = False
-        link = EntityLink(
-            target="ML",
-            relationship="relates_to",
-            is_default=True,
-        )
-        page = _make_page(entity_links=[link])
-        errors = spec_schema.validate(page)
-        assert not any("default relationship" in e.message for e in errors)
 
     def test_strict_produces_errors(self, spec_schema: Schema) -> None:
         spec_schema.settings.enforcement = Enforcement.STRICT
@@ -384,11 +345,7 @@ class TestValidation:
         assert errors[0].severity == "warning"
 
     def test_multiple_errors(self, spec_schema: Schema) -> None:
-        link = EntityLink(
-            target="X",
-            direction=Direction.OUTGOING,
-            relationship="nonexistent",
-        )
+        link = EntityLink(target="X", relationship="nonexistent")
         page = _make_page(page_type="project", entity_links=[link])
         errors = spec_schema.validate(page)
         # Missing required fields + unknown relationship.

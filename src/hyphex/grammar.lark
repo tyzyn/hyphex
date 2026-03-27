@@ -1,23 +1,21 @@
 // Hyphex-flavoured markdown inline grammar.
-// Parses entity links [[...]] and citations {{...}} from body content.
+// Parses entity links [Target](rel:type), citations [@src, p. N],
+// and evidence blocks (::: evidence ... :::) from body content.
 
-start: (entity_link | citation | TEXT)+
+start: (entity_link | citation | evidence_block | TEXT)+
 
-entity_link: "[[" target (DIRECTION relationship ("|" properties)?)? "]]"
-target: TARGET
-relationship: RELATIONSHIP
-properties: prop ("," prop)*
-prop: key "=" value
-key: KEY
-value: VALUE
+// Entity links: [Target](rel:relationship)
+entity_link: "[" LINK_TEXT "](rel:" RELATIONSHIP ")"
 
-citation: "{{" source_id "}}"
-source_id: SOURCE_ID
+// Citations: [@src_001] or [@src_001, p. 5] or [@src_001, pp. 12-15]
+citation: "[@" SRC_ID PAGE_REF? "]"
 
-DIRECTION: ">" | "<"
-TARGET: /[^\]><|]+/
+// Evidence blocks: ::: evidence\n...\n:::
+evidence_block: /:::[ ]*evidence[ ]*\n/ EVIDENCE_CONTENT /\n:::/
+
+LINK_TEXT: /[^\]]+/
 RELATIONSHIP: /[a-z_]+/
-KEY: /[a-z_]+/
-VALUE: /[^,\]]+/
-SOURCE_ID: /[0-9]+/
-TEXT: /(?:(?!\[\[)(?!\{\{).)+/s
+SRC_ID: /src_\d+/
+PAGE_REF: /,\s*pp?\.\s*[\d][\d\-]*/
+EVIDENCE_CONTENT: /[^\n][\s\S]*?(?=\n:::)/
+TEXT: /(?:(?!\[(?:[^\]]*\]\(rel:))(?!\[@src_)(?!:::[ ]*evidence).)+/s

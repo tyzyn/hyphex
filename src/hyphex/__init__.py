@@ -18,7 +18,7 @@ from hyphex.hooks import (
     cleanup_and_resolve,
     register_builtin_hooks,
 )
-from hyphex.models import Citation, Direction, EntityLink, Page, Source
+from hyphex.models import Citation, EntityLink, EvidenceBlock, Page, Source
 from hyphex.parser import Parser
 from hyphex.schema import Schema, SchemaBuilder, SchemaError
 from hyphex.store import WikiStore, slugify
@@ -26,8 +26,8 @@ from hyphex.version import __version__
 
 __all__ = [
     "Citation",
-    "Direction",
     "EntityLink",
+    "EvidenceBlock",
     "FrontmatterError",
     "HookError",
     "HookRegistry",

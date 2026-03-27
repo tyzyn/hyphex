@@ -75,7 +75,6 @@ def create_hyphex_agent(
     system_prompt = template.render(
         schema_summary=schema.to_prompt(),
         doc_id=doc_id,
-        src_id=src_id,
     )
 
     middleware = [

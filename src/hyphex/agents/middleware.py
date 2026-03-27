@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 _RE_PANDOC_CITE = re.compile(r"\[@(src_\d+)(?:,\s*pp?\.\s*[\d\-]+)?\]")
 _RE_HEADING = re.compile(r"^#+\s+.*$", re.MULTILINE)
-_RE_RELATIONSHIP = re.compile(r"\[\[[^\]]*?([><])([a-z_]+)")
+_RE_RELATIONSHIP = re.compile(r"\[[^\]]+\]\(rel:([a-z_]+)\)")
 
 
 def _get_file_path(request: ToolCallRequest) -> str:
@@ -367,18 +367,18 @@ class SchemaValidationMiddleware(AgentMiddleware):
         """Check that entity link relationships exist in the schema.
 
         Args:
-            text: Text to scan for ``[[Target>relationship]]`` patterns.
+            text: Text to scan for ``[Target](rel:relationship)`` patterns.
 
         Returns:
             List of error messages for unknown relationships.
 
         Example:
-            >>> mw._validate_relationships("See [[Bob>invented_by]].")
+            >>> mw._validate_relationships("See [Bob](rel:invented_by).")
             ["Unknown relationship 'invented_by'. ..."]
         """
         errors: list[str] = []
         for match in _RE_RELATIONSHIP.finditer(text):
-            rel_name = match.group(2)
+            rel_name = match.group(1)
             if rel_name not in self._valid_rels:
                 errors.append(
                     f"Unknown relationship '{rel_name}'. "

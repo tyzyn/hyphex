@@ -210,7 +210,7 @@ class HookRegistry:
 # ── Built-in hooks ────────────────────────────────────────────────────
 
 
-_RE_CITATION = re.compile(r"\{\{(\d+)\}\}")
+_RE_CITATION = re.compile(r"\[@(src_\d+)(?:,[^\]]+)?\]")
 
 
 def citation_inject(context: WriteContext) -> WriteContext:
@@ -237,7 +237,13 @@ def citation_inject(context: WriteContext) -> WriteContext:
     existing_sources: list[dict[str, Any]] = list(fm.get("sources", []))
 
     existing_ids = [s["id"] for s in existing_sources if isinstance(s, dict) and "id" in s]
-    next_id = max(existing_ids, default=0) + 1
+    existing_nums = [
+        int(sid.removeprefix("src_"))
+        for sid in existing_ids
+        if isinstance(sid, str) and sid.startswith("src_")
+    ]
+    next_num = max(existing_nums, default=0) + 1
+    next_id = f"src_{next_num:03d}"
 
     new_source: dict[str, Any] = {
         "id": next_id,
@@ -256,7 +262,7 @@ def citation_inject(context: WriteContext) -> WriteContext:
 
     updated_page = context.page.model_copy(update={"frontmatter": fm})
     agent_context = dict(context.agent_context)
-    agent_context["citation_hint"] = f"{{{{{next_id}}}}}"
+    agent_context["citation_hint"] = f"[@{next_id}]"
 
     return context.model_copy(update={"page": updated_page, "agent_context": agent_context})
 
@@ -288,32 +294,20 @@ def cleanup_and_resolve(context: WriteContext) -> WriteContext:
 
     # Step 1: Extract citations and entity links from body.
     entity_links = page.entity_links
-    cited_ids: set[int] = set()
+    cited_ids: set[str] = set()
     if context.parser is not None:
-        links, citations = context.parser.parse_inline(body)
+        links, citations, _evidence = context.parser.parse_inline(body)
         entity_links = links
         cited_ids = {c.source_id for c in citations}
     else:
-        cited_ids = {int(m.group(1)) for m in _RE_CITATION.finditer(body)}
+        cited_ids = {m.group(1) for m in _RE_CITATION.finditer(body)}
 
     # Step 2: Remove uncited sources.
     raw_sources: list[dict[str, Any]] = fm.get("sources", [])
-    cited_sources = [s for s in raw_sources if isinstance(s, dict) and s.get("id") in cited_ids]
-
-    # Step 3: Renumber sequentially.
-    id_map: dict[int, int] = {}
-    renumbered: list[dict[str, Any]] = []
-    for new_id, source in enumerate(cited_sources, start=1):
-        old_id = source["id"]
-        id_map[old_id] = new_id
-        renumbered.append({**source, "id": new_id})
-
-    def _replace_id(match: re.Match[str]) -> str:
-        old = int(match.group(1))
-        return f"{{{{{id_map.get(old, old)}}}}}"
-
-    updated_body = _RE_CITATION.sub(_replace_id, body)
-    fm["sources"] = renumbered
+    fm["sources"] = [
+        s for s in raw_sources if isinstance(s, dict) and s.get("id") in cited_ids
+    ]
+    updated_body = body
 
     # Step 4: Create stubs for missing link targets.
     if context.store is not None:

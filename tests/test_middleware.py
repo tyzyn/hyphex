@@ -190,7 +190,7 @@ class TestExtractBodyText:
 class TestSchemaValidationMiddleware:
     def test_allows_valid_page(self, schema):
         mw = SchemaValidationMiddleware(schema)
-        body = "\n# Alice\n\nWorks at [[ACME>works_at]].\n"
+        body = "\n# Alice\n\nWorks at [ACME](rel:works_at).\n"
         content = _page_content({"type": "person", "born": "1990"}, body)
         request = _make_request("write_file", {"file_path": "alice.md", "content": content})
         handler = _make_handler()
@@ -209,7 +209,7 @@ class TestSchemaValidationMiddleware:
 
     def test_rejects_unknown_relationship(self, schema):
         mw = SchemaValidationMiddleware(schema)
-        body = "\n# Alice\n\nLinked to [[Bob>invented_by]].\n"
+        body = "\n# Alice\n\nLinked to [Bob](rel:invented_by).\n"
         content = _page_content({"type": "person"}, body)
         request = _make_request("write_file", {"file_path": "alice.md", "content": content})
         handler = _make_handler()
@@ -232,7 +232,7 @@ class TestSchemaValidationMiddleware:
             {
                 "file_path": "boo.md",
                 "old_string": "old text",
-                "new_string": "Linked to [[Bob>invented_by]].",
+                "new_string": "Linked to [Bob](rel:invented_by).",
             },
         )
         handler = _make_handler()
@@ -247,7 +247,7 @@ class TestSchemaValidationMiddleware:
             {
                 "file_path": "alice.md",
                 "old_string": "old",
-                "new_string": "Works at [[ACME>works_at]].",
+                "new_string": "Works at [ACME](rel:works_at).",
             },
         )
         handler = _make_handler()

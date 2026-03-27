@@ -2,89 +2,87 @@
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class Direction(str, Enum):
-    """Edge direction relative to the current page.
-
-    Args:
-        OUTGOING: Current page points to target (``>``).
-        INCOMING: Target points to current page (``<``).
-
-    Example:
-        >>> Direction.OUTGOING.value
-        '>'
-    """
-
-    OUTGOING = ">"
-    INCOMING = "<"
-
-
 class EntityLink(BaseModel):
-    """A wiki-style entity link parsed from Hyphex markdown.
+    """An entity link parsed from Hyphex markdown.
+
+    Uses markdown link syntax with a ``rel:`` prefix:
+    ``[Target](rel:relationship)``.
 
     Args:
-        target: Title of the linked wiki page.
-        direction: Edge direction, or ``None`` for bare ``[[Target]]`` links.
-        relationship: Relationship type in ``snake_case``, or ``None`` before
-            default resolution.
-        properties: Optional key-value edge properties.
-        is_default: ``True`` when the relationship was inferred from the
-            schema's ``default_relationship`` rather than written explicitly.
+        target: Title of the linked wiki page (the display text).
+        relationship: Relationship type in ``snake_case``. Always required.
 
     Example:
-        >>> link = EntityLink(target="Python", direction=Direction.OUTGOING, relationship="implemented_in")
-        >>> link.is_default
-        False
+        >>> link = EntityLink(target="Python", relationship="has_skill")
+        >>> link.relationship
+        'has_skill'
     """
 
     target: str
-    direction: Direction | None = None
-    relationship: str | None = None
-    properties: dict[str, str] = Field(default_factory=dict)
-    is_default: bool = False
+    relationship: str
 
 
 class Citation(BaseModel):
-    """An inline citation referencing a source declared in frontmatter.
+    """A pandoc-style inline citation referencing a source.
+
+    Format: ``[@src_001]`` or ``[@src_001, p. 5]`` or ``[@src_001, pp. 12-15]``.
 
     Args:
-        source_id: Integer ID matching a source in the page's frontmatter ``sources`` list.
+        source_id: String identifier matching a source in frontmatter (e.g. ``"src_001"``).
+        page_ref: Optional page reference string (e.g. ``"p. 5"``, ``"pp. 12-15"``).
 
     Example:
-        >>> cite = Citation(source_id=1)
+        >>> cite = Citation(source_id="src_001", page_ref="p. 5")
         >>> cite.source_id
-        1
+        'src_001'
     """
 
-    source_id: int
+    source_id: str
+    page_ref: str | None = None
+
+
+class EvidenceBlock(BaseModel):
+    """A verbatim evidence block from a source document.
+
+    Fenced with ``::: evidence`` and ``:::``. Contains text copied
+    directly from the source for grounding verification.
+
+    Args:
+        content: The verbatim text from the source.
+
+    Example:
+        >>> ev = EvidenceBlock(content="Gabriel has 5+ years of experience.")
+        >>> ev.content
+        'Gabriel has 5+ years of experience.'
+    """
+
+    content: str
 
 
 class Source(BaseModel):
     """A source document declared in page frontmatter.
 
     Args:
-        id: Unique integer identifier used in ``{{id}}`` citations.
+        id: String identifier used in ``[@id]`` citations (e.g. ``"src_001"``).
         title: Human-readable source document title.
-        url: URL to the source document.
-        page: Optional page number or range.
+        url: URL or path to the source document.
         section: Optional section heading within the document.
         hash: Optional content hash for change detection.
 
     Example:
-        >>> src = Source(id=1, title="Report", url="https://example.com/report.pdf")
+        >>> src = Source(id="src_001", title="Report", url="https://example.com/report.pdf")
         >>> src.id
-        1
+        'src_001'
     """
 
-    id: int
+    id: str
     title: str
     url: str
-    page: int | str | None = None
     section: str | None = None
     hash: str | None = None
 
@@ -97,10 +95,11 @@ class Page(BaseModel):
         body: The markdown body content (everything after the frontmatter).
         entity_links: Entity links extracted from the body.
         citations: Citations extracted from the body.
+        evidence_blocks: Verbatim evidence blocks extracted from the body.
         sources: Source documents parsed from frontmatter.
 
     Example:
-        >>> page = Page(frontmatter={"type": "person"}, body="See [[Alice>knows]].")
+        >>> page = Page(frontmatter={"type": "person"}, body="See [Alice](rel:knows).")
         >>> page.frontmatter["type"]
         'person'
     """
@@ -109,34 +108,5 @@ class Page(BaseModel):
     body: str = ""
     entity_links: list[EntityLink] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    evidence_blocks: list[EvidenceBlock] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
-
-    def resolve_defaults(self, default_relationship: str = "relates_to") -> Page:
-        """Fill in the default relationship for bare ``[[Target]]`` links.
-
-        Bare links (no ``>relationship``) get ``relationship`` set to
-        *default_relationship* and ``is_default`` set to ``True``. Links
-        that already have an explicit relationship are left unchanged.
-
-        Args:
-            default_relationship: The relationship type to assign to bare
-                links. Defaults to ``"relates_to"``.
-
-        Returns:
-            A new ``Page`` with defaults resolved. The original is not mutated.
-
-        Example:
-            >>> page = Page(entity_links=[EntityLink(target="ML")])
-            >>> resolved = page.resolve_defaults()
-            >>> resolved.entity_links[0].relationship
-            'relates_to'
-            >>> resolved.entity_links[0].is_default
-            True
-        """
-        resolved_links = [
-            link.model_copy(update={"relationship": default_relationship, "is_default": True})
-            if link.relationship is None
-            else link
-            for link in self.entity_links
-        ]
-        return self.model_copy(update={"entity_links": resolved_links})
